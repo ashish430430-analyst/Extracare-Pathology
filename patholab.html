@@ -1,0 +1,597 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>extracare pathology lab</title>
+<script src="https://unpkg.com/react@18/umd/react.development.js"></script>
+<script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+body{font-family:'Segoe UI',system-ui,sans-serif;background:#F1F5F9;color:#0F172A;font-size:14px}
+::-webkit-scrollbar{width:5px;height:5px}
+::-webkit-scrollbar-track{background:transparent}
+::-webkit-scrollbar-thumb{background:#CBD5E1;border-radius:99px}
+input,select,textarea,button{font-family:inherit}
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel">
+const { useState, useMemo, useEffect } = React;
+
+/* ═══════════════════════════════════════════════════
+   UTILS
+═══════════════════════════════════════════════════ */
+const db = {
+  get:(k,d=[])=>{try{const v=localStorage.getItem(k);return v?JSON.parse(v):d}catch{return d}},
+  set:(k,v)=>{try{localStorage.setItem(k,JSON.stringify(v))}catch{}}
+};
+const uid=()=>Math.random().toString(36).slice(2,9);
+const seq=k=>{const n=(parseInt(localStorage.getItem('seq_'+k)||0)+1);localStorage.setItem('seq_'+k,n);return n};
+const pad=(n,l=5)=>String(n).padStart(l,'0');
+const genCode=()=>`P-${pad(seq('patient'))}`;
+const now=()=>new Date().toISOString();
+const fmtDate=d=>{if(!d)return'—';try{return new Date(d).toLocaleDateString('en-GB',{day:'2-digit',month:'short',year:'numeric'})}catch{return d}};
+const fmtDT=d=>{if(!d)return'—';try{return new Date(d).toLocaleString('en-GB',{day:'2-digit',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'})}catch{return d}};
+const initials=n=>n.trim().split(' ').map(w=>w[0]).slice(0,2).join('').toUpperCase()||'?';
+const PALETTES=[
+  {bg:'#EFF6FF',fg:'#1D4ED8'},{bg:'#F0FDF4',fg:'#15803D'},{bg:'#FDF4FF',fg:'#9333EA'},
+  {bg:'#FFF7ED',fg:'#C2410C'},{bg:'#FFF1F2',fg:'#BE123C'},{bg:'#F0FDFA',fg:'#0F766E'}
+];
+const pal=i=>PALETTES[Math.abs(i)%PALETTES.length];
+
+/* ═══════════════════════════════════════════════════
+   DESIGN TOKENS + PRIMITIVES
+═══════════════════════════════════════════════════ */
+const C={
+  bg:'#F1F5F9',card:'#FFFFFF',border:'#E2E8F0',
+  text:'#0F172A',muted:'#64748B',hint:'#94A3B8',
+  primary:'#6366F1',primaryDark:'#4F46E5',
+  success:'#16A34A',warn:'#D97706',danger:'#DC2626',
+  successBg:'#F0FDF4',warnBg:'#FFFBEB',dangerBg:'#FEF2F2',
+  successText:'#15803D',warnText:'#92400E',dangerText:'#991B1B',
+  sidebar:'#0F172A',sidebarHover:'#1E293B',sidebarActive:'#6366F1',
+};
+
+const s={
+  card:{background:C.card,border:`1px solid ${C.border}`,borderRadius:14,padding:'22px 24px'},
+  input:{width:'100%',border:`1px solid ${C.border}`,borderRadius:8,padding:'9px 13px',fontSize:13,background:'#FAFAFA',color:C.text,outline:'none'},
+  th:{padding:'10px 16px',textAlign:'left',fontSize:11,fontWeight:700,color:C.hint,textTransform:'uppercase',letterSpacing:.6,background:'#F8FAFC',borderBottom:`1px solid ${C.border}`},
+  td:{padding:'13px 16px',borderBottom:`1px solid #F8FAFC`,fontSize:13,color:C.text,verticalAlign:'middle'},
+};
+
+// Button
+const Btn=({children,v='primary',sm,onClick,disabled,type='button',style={}})=>{
+  const base={border:'none',borderRadius:8,fontWeight:600,cursor:disabled?'not-allowed':'pointer',
+    opacity:disabled?.5:1,fontSize:sm?11:13,padding:sm?'5px 11px':'9px 18px',
+    display:'inline-flex',alignItems:'center',gap:5,transition:'opacity .15s',fontFamily:'inherit',...style};
+  const vs={
+    primary:{background:C.primary,color:'#fff'},
+    dark:{background:C.text,color:'#fff'},
+    ghost:{background:'transparent',color:C.muted,border:`1px solid ${C.border}`},
+    danger:{background:C.dangerBg,color:C.dangerText},
+    success:{background:C.successBg,color:C.successText},
+  };
+  return <button type={type} disabled={disabled} onClick={onClick} style={{...base,...vs[v]}}>{children}</button>;
+};
+
+// Input / Select / Textarea
+const Input=({label,error,...p})=>(
+  <label style={{display:'flex',flexDirection:'column',gap:5}}>
+    {label&&<span style={{fontSize:11,fontWeight:700,color:C.muted,textTransform:'uppercase',letterSpacing:.5}}>{label}</span>}
+    <input style={{...s.input,...(error?{borderColor:C.danger}:{})}} {...p}/>
+    {error&&<span style={{fontSize:11,color:C.danger}}>{error}</span>}
+  </label>
+);
+const Sel=({label,children,...p})=>(
+  <label style={{display:'flex',flexDirection:'column',gap:5}}>
+    {label&&<span style={{fontSize:11,fontWeight:700,color:C.muted,textTransform:'uppercase',letterSpacing:.5}}>{label}</span>}
+    <select style={{...s.input}}>{children}</select>
+  </label>
+);
+const Textarea=({label,...p})=>(
+  <label style={{display:'flex',flexDirection:'column',gap:5}}>
+    {label&&<span style={{fontSize:11,fontWeight:700,color:C.muted,textTransform:'uppercase',letterSpacing:.5}}>{label}</span>}
+    <textarea style={{...s.input,resize:'vertical',minHeight:72}} {...p}/>
+  </label>
+);
+
+// Card
+const Card=({children,style={}})=><div style={{...s.card,...style}}>{children}</div>;
+
+// Avatar
+const Avatar=({name,idx=0,size=34})=>{
+  const{bg,fg}=pal(idx);
+  return <div style={{width:size,height:size,borderRadius:'50%',background:bg,color:fg,display:'flex',alignItems:'center',justifyContent:'center',fontSize:size*.36,fontWeight:700,flexShrink:0}}>{initials(name)}</div>;
+};
+
+// Badge
+const Badge=({label,type='default'})=>{
+  const map={
+    male:{bg:'#EFF6FF',c:'#1D4ED8'},female:{bg:'#FDF2F8',c:'#9D174D'},
+    active:{bg:C.successBg,c:C.successText},pending:{bg:C.warnBg,c:C.warnText},
+    default:{bg:'#F1F5F9',c:C.muted},
+  };
+  const t=map[type]||map.default;
+  return <span style={{background:t.bg,color:t.c,fontSize:11,fontWeight:700,padding:'3px 10px',borderRadius:99,letterSpacing:.3,textTransform:'capitalize',whiteSpace:'nowrap'}}>{label}</span>;
+};
+
+// Stat card
+const Stat=({label,value,icon,accent})=>(
+  <div style={{background:accent?C.primary:C.card,border:`1px solid ${accent?C.primary:C.border}`,borderRadius:12,padding:'18px 20px',flex:1,minWidth:130}}>
+    <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',marginBottom:10}}>
+      <span style={{fontSize:11,fontWeight:700,color:accent?'rgba(255,255,255,.7)':C.hint,textTransform:'uppercase',letterSpacing:.5}}>{label}</span>
+      <span style={{fontSize:20}}>{icon}</span>
+    </div>
+    <div style={{fontSize:30,fontWeight:800,color:accent?'#fff':C.text}}>{value}</div>
+  </div>
+);
+
+// Section header
+const SecHead=({title,sub,action})=>(
+  <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',marginBottom:22}}>
+    <div><h2 style={{fontSize:20,fontWeight:700,color:C.text,margin:0}}>{title}</h2>
+    {sub&&<p style={{fontSize:13,color:C.muted,marginTop:3}}>{sub}</p>}</div>
+    {action}
+  </div>
+);
+
+// Back button
+const Back=({onClick,label='Back'})=>(
+  <button onClick={onClick} style={{background:'none',border:'none',cursor:'pointer',color:C.muted,fontSize:13,display:'flex',alignItems:'center',gap:6,marginBottom:20,fontFamily:'inherit',fontWeight:600}}>
+    ← {label}
+  </button>
+);
+
+// Empty state
+const Empty=({icon,title,sub,action})=>(
+  <div style={{textAlign:'center',padding:'60px 20px',color:C.hint}}>
+    <div style={{fontSize:44,marginBottom:14}}>{icon}</div>
+    <div style={{fontSize:16,fontWeight:700,color:C.muted,marginBottom:6}}>{title}</div>
+    {sub&&<div style={{fontSize:13,marginBottom:16}}>{sub}</div>}
+    {action}
+  </div>
+);
+
+// Detail pair
+const DPair=({label,value})=>(
+  <div style={{padding:'10px 0',borderBottom:`1px solid #F8FAFC`}}>
+    <div style={{fontSize:10,fontWeight:700,color:C.hint,textTransform:'uppercase',letterSpacing:.5,marginBottom:3}}>{label}</div>
+    <div style={{fontSize:13,color:C.text,textTransform:'capitalize'}}>{value||'—'}</div>
+  </div>
+);
+
+// Divider
+const Hr=({my=16})=><div style={{borderTop:`1px solid ${C.border}`,margin:`${my}px 0`}}/>;
+
+/* ═══════════════════════════════════════════════════
+   SIDEBAR
+═══════════════════════════════════════════════════ */
+const NAV=[
+  {id:'dashboard',icon:'⚡',label:'Dashboard'},
+  {id:'patients', icon:'👤',label:'Patients'},
+  {id:'orders',   icon:'🧪',label:'Orders',   coming:true},
+  {id:'samples',  icon:'🏷️',label:'Samples',  coming:true},
+  {id:'reports',  icon:'📄',label:'Reports',  coming:true},
+  {id:'billing',  icon:'💰',label:'Billing',  coming:true},
+  {id:'inventory',icon:'📦',label:'Inventory',coming:true},
+];
+
+const Sidebar=({active,set})=>(
+  <aside style={{width:230,background:C.sidebar,minHeight:'100vh',display:'flex',flexDirection:'column',flexShrink:0,position:'sticky',top:0}}>
+    <div style={{padding:'24px 20px 18px',borderBottom:'1px solid #1E293B'}}>
+      <div style={{display:'flex',alignItems:'center',gap:10,marginBottom:4}}>
+        <div style={{width:32,height:32,borderRadius:8,background:C.primary,display:'flex',alignItems:'center',justifyContent:'center',fontSize:16}}>🔬</div>
+        <div>
+          <div style={{fontSize:14,fontWeight:800,color:'#fff',letterSpacing:.3}}>Extracare Pathology Lab</div>
+          <div style={{fontSize:10,color:'#475569',letterSpacing:.3}}>LIMS v1.0</div>
+        </div>
+      </div>
+    </div>
+    <nav style={{padding:'12px 10px',flex:1}}>
+      {NAV.map(n=>{
+        const on=active===n.id;
+        return(
+          <button key={n.id} onClick={()=>!n.coming&&set(n.id)}
+            style={{display:'flex',alignItems:'center',gap:10,width:'100%',padding:'10px 12px',border:'none',
+              borderRadius:8,background:on?C.sidebarActive:'transparent',
+              color:n.coming?'#334155':on?'#fff':'#94A3B8',fontSize:13,fontWeight:on?700:400,
+              cursor:n.coming?'default':'pointer',textAlign:'left',marginBottom:3,fontFamily:'inherit',
+              transition:'all .15s'}}>
+            <span style={{fontSize:16,opacity:n.coming?.4:1}}>{n.icon}</span>
+            <span style={{opacity:n.coming?.4:1}}>{n.label}</span>
+            {n.coming&&<span style={{marginLeft:'auto',fontSize:9,background:'#1E293B',color:'#475569',padding:'2px 6px',borderRadius:4,fontWeight:700}}>SOON</span>}
+          </button>
+        );
+      })}
+    </nav>
+    <div style={{padding:'16px 20px',borderTop:'1px solid #1E293B'}}>
+      <div style={{fontSize:11,color:'#334155',marginBottom:2,fontWeight:600}}>Storage</div>
+      <div style={{fontSize:10,color:'#475569'}}>localStorage (browser)</div>
+    </div>
+  </aside>
+);
+
+/* ═══════════════════════════════════════════════════
+   DASHBOARD
+═══════════════════════════════════════════════════ */
+const Dashboard=({patients,setTab})=>{
+  const today=new Date().toISOString().slice(0,10);
+  const todayPts=patients.filter(p=>p.createdAt?.startsWith(today)).length;
+  const male=patients.filter(p=>p.gender==='male').length;
+  const female=patients.filter(p=>p.gender==='female').length;
+
+  const recent=[...patients].sort((a,b)=>b.createdAt>a.createdAt?1:-1).slice(0,6);
+
+  return(
+    <div>
+      <div style={{marginBottom:28}}>
+        <h1 style={{fontSize:24,fontWeight:800,color:C.text,margin:0}}>
+          Good {new Date().getHours()<12?'Morning':new Date().getHours()<18?'Afternoon':'Evening'} 👋
+        </h1>
+        <p style={{color:C.muted,marginTop:4,fontSize:14}}>Here's your lab summary for today, {new Date().toLocaleDateString('en-GB',{weekday:'long',day:'numeric',month:'long'})}.</p>
+      </div>
+
+      <div style={{display:'grid',gridTemplateColumns:'repeat(4,1fr)',gap:14,marginBottom:28}}>
+        <Stat label="Total Patients" value={patients.length} icon="👤" accent/>
+        <Stat label="Registered Today" value={todayPts} icon="📅"/>
+        <Stat label="Male" value={male} icon="♂️"/>
+        <Stat label="Female" value={female} icon="♀️"/>
+      </div>
+
+      <div style={{display:'grid',gridTemplateColumns:'2fr 1fr',gap:16}}>
+        <Card>
+          <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:16}}>
+            <h3 style={{fontSize:15,fontWeight:700,margin:0}}>Recent Patients</h3>
+            <Btn sm v="ghost" onClick={()=>setTab('patients')}>View all →</Btn>
+          </div>
+          {recent.length===0
+            ?<Empty icon="👤" title="No patients yet" sub="Register your first patient to get started" action={<Btn onClick={()=>setTab('patients')}>+ Register Patient</Btn>}/>
+            :recent.map((p,i)=>(
+              <div key={p.id} style={{display:'flex',alignItems:'center',gap:12,padding:'10px 0',borderBottom:`1px solid #F8FAFC`}}>
+                <Avatar name={p.fullName} idx={patients.indexOf(p)} size={36}/>
+                <div style={{flex:1,minWidth:0}}>
+                  <div style={{fontWeight:600,fontSize:13,color:C.text,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{p.fullName}</div>
+                  <div style={{fontSize:11,color:C.hint,fontFamily:'monospace'}}>{p.patientCode}</div>
+                </div>
+                <Badge label={p.gender||'—'} type={p.gender}/>
+                <div style={{fontSize:11,color:C.hint}}>{fmtDate(p.createdAt)}</div>
+              </div>
+          ))}
+        </Card>
+
+        <div style={{display:'flex',flexDirection:'column',gap:14}}>
+          <Card>
+            <h3 style={{fontSize:14,fontWeight:700,margin:'0 0 14px'}}>Quick Actions</h3>
+            {[
+              {icon:'👤',label:'Register new patient',fn:()=>setTab('patients')},
+              {icon:'🧪',label:'Create test order',fn:()=>{}},
+              {icon:'🏷️',label:'Track sample',fn:()=>{}},
+              {icon:'📄',label:'Generate report',fn:()=>{}},
+            ].map((a,i)=>(
+              <button key={i} onClick={a.fn} style={{display:'flex',alignItems:'center',gap:10,width:'100%',padding:'10px 12px',background:'#F8FAFC',border:`1px solid ${C.border}`,borderRadius:8,textAlign:'left',fontSize:13,fontWeight:500,cursor:'pointer',marginBottom:8,fontFamily:'inherit',color:C.text,transition:'background .15s'}}>
+                <span style={{fontSize:18}}>{a.icon}</span>{a.label}
+              </button>
+            ))}
+          </Card>
+          <Card style={{background:'linear-gradient(135deg,#6366F1,#8B5CF6)',border:'none'}}>
+            <div style={{fontSize:13,fontWeight:700,color:'rgba(255,255,255,.8)',marginBottom:6}}>More modules coming</div>
+            <div style={{fontSize:12,color:'rgba(255,255,255,.6)',lineHeight:1.6}}>Orders, Samples, Reports, Billing & Inventory modules will be added one by one.</div>
+          </Card>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+/* ═══════════════════════════════════════════════════
+   PATIENTS MODULE
+═══════════════════════════════════════════════════ */
+const BLOOD=['','A+','A-','B+','B-','AB+','AB-','O+','O-','Unknown'];
+const EMPTY={fullName:'',gender:'male',dob:'',phone:'',email:'',nationalId:'',bloodGroup:'',refDoctor:'',address:'',notes:''};
+
+function validate(f){
+  const e={};
+  if(!f.fullName.trim()) e.fullName='Full name is required';
+  if(f.phone&&!/^[\d\s+\-()/]{6,}$/.test(f.phone)) e.phone='Invalid phone number';
+  if(f.email&&!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(f.email)) e.email='Invalid email';
+  return e;
+}
+
+// ── Form ──────────────────────────────────────────
+const PatientForm=({init=EMPTY,onSave,onCancel,isEdit})=>{
+  const[f,setF]=useState({...init});
+  const[err,setErr]=useState({});
+  const set=(k,v)=>{setF(x=>({...x,[k]:v}));setErr(x=>({...x,[k]:undefined}))};
+
+  const submit=e=>{
+    e.preventDefault();
+    const errs=validate(f);
+    if(Object.keys(errs).length){setErr(errs);return;}
+    onSave(f);
+  };
+
+  const row=(...items)=>(
+    <div style={{display:'grid',gridTemplateColumns:items.map(()=>'1fr').join(' '),gap:16}}>
+      {items}
+    </div>
+  );
+
+  return(
+    <form onSubmit={submit} noValidate>
+      <Back onClick={onCancel}/>
+      <div style={{display:'flex',alignItems:'center',gap:12,marginBottom:24}}>
+        <div style={{width:44,height:44,borderRadius:10,background:'#EEF2FF',display:'flex',alignItems:'center',justifyContent:'center',fontSize:20}}>👤</div>
+        <div>
+          <h2 style={{fontSize:20,fontWeight:800,margin:0}}>{isEdit?'Edit patient':'Register new patient'}</h2>
+          <p style={{fontSize:12,color:C.muted,marginTop:2}}>{isEdit?'Update patient information':'Add a new patient to the system'}</p>
+        </div>
+      </div>
+
+      <Card>
+        <div style={{fontSize:12,fontWeight:700,color:C.primary,textTransform:'uppercase',letterSpacing:.6,marginBottom:16}}>Personal Information</div>
+        <div style={{display:'flex',flexDirection:'column',gap:14}}>
+          <Input label="Full name *" value={f.fullName} onChange={e=>set('fullName',e.target.value)} placeholder="e.g. Ahmed Al-Rashid" error={err.fullName} autoFocus/>
+          {row(
+            <div key="g"><label style={{fontSize:11,fontWeight:700,color:C.muted,textTransform:'uppercase',letterSpacing:.5,display:'block',marginBottom:5}}>Gender</label>
+            <select value={f.gender} onChange={e=>set('gender',e.target.value)} style={{...s.input}}>
+              <option value="male">Male</option><option value="female">Female</option><option value="other">Other</option>
+            </select></div>,
+            <Input key="dob" label="Date of birth" type="date" value={f.dob} onChange={e=>set('dob',e.target.value)}/>
+          )}
+          {row(
+            <Input key="ph" label="Phone" value={f.phone} onChange={e=>set('phone',e.target.value)} placeholder="+966 5X XXX XXXX" error={err.phone}/>,
+            <Input key="em" label="Email" type="email" value={f.email} onChange={e=>set('email',e.target.value)} placeholder="patient@email.com" error={err.email}/>
+          )}
+          {row(
+            <Input key="ni" label="National ID / Iqama" value={f.nationalId} onChange={e=>set('nationalId',e.target.value)} placeholder="1XXXXXXXXX"/>,
+            <div key="bg"><label style={{fontSize:11,fontWeight:700,color:C.muted,textTransform:'uppercase',letterSpacing:.5,display:'block',marginBottom:5}}>Blood Group</label>
+            <select value={f.bloodGroup} onChange={e=>set('bloodGroup',e.target.value)} style={{...s.input}}>
+              {BLOOD.map(g=><option key={g} value={g}>{g||'— Select —'}</option>)}
+            </select></div>
+          )}
+          <Input label="Referring doctor" value={f.refDoctor} onChange={e=>set('refDoctor',e.target.value)} placeholder="Dr. Name"/>
+          <Input label="Address" value={f.address} onChange={e=>set('address',e.target.value)} placeholder="Street, City, Region"/>
+          <Textarea label="Clinical notes" value={f.notes} onChange={e=>set('notes',e.target.value)} placeholder="Special instructions or clinical history…" rows={3}/>
+        </div>
+
+        <Hr my={20}/>
+        <div style={{display:'flex',gap:10}}>
+          <Btn type="submit" v="dark">{isEdit?'✓ Save changes':'+ Register patient'}</Btn>
+          <Btn type="button" v="ghost" onClick={onCancel}>Cancel</Btn>
+        </div>
+      </Card>
+    </form>
+  );
+};
+
+// ── Detail ────────────────────────────────────────
+const PatientDetail=({patient,idx,onEdit,onDelete,onBack})=>(
+  <div>
+    <Back onClick={onBack}/>
+    <Card>
+      <div style={{display:'flex',alignItems:'center',gap:16,marginBottom:20,paddingBottom:20,borderBottom:`1px solid ${C.border}`}}>
+        <Avatar name={patient.fullName} idx={idx} size={56}/>
+        <div style={{flex:1}}>
+          <div style={{fontSize:20,fontWeight:800,color:C.text}}>{patient.fullName}</div>
+          <div style={{fontFamily:'monospace',fontSize:12,color:C.hint,marginTop:2,background:'#F1F5F9',display:'inline-block',padding:'2px 8px',borderRadius:4}}>{patient.patientCode}</div>
+          {patient.bloodGroup&&<Badge label={`Blood: ${patient.bloodGroup}`} style={{marginLeft:8}}/>}
+        </div>
+        <div style={{display:'flex',gap:8}}>
+          <Btn sm v="ghost" onClick={onEdit}>✏ Edit</Btn>
+          <Btn sm v="danger" onClick={onDelete}>🗑 Delete</Btn>
+        </div>
+      </div>
+
+      <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'0 40px'}}>
+        {[
+          ['Gender',patient.gender],['Date of Birth',fmtDate(patient.dob)],
+          ['Phone',patient.phone],['Email',patient.email],
+          ['National ID',patient.nationalId],['Blood Group',patient.bloodGroup],
+          ['Referring Doctor',patient.refDoctor],['Registered',fmtDT(patient.createdAt)],
+          ['Address',patient.address],
+        ].map(([l,v])=><DPair key={l} label={l} value={v}/>)}
+      </div>
+
+      {patient.notes&&(
+        <div style={{marginTop:16,background:'#F8FAFC',borderRadius:8,padding:'14px 16px'}}>
+          <div style={{fontSize:10,fontWeight:700,color:C.hint,textTransform:'uppercase',letterSpacing:.5,marginBottom:6}}>Clinical Notes</div>
+          <div style={{fontSize:13,color:C.text,lineHeight:1.7}}>{patient.notes}</div>
+        </div>
+      )}
+    </Card>
+  </div>
+);
+
+// ── List ──────────────────────────────────────────
+const PatientList=({patients,onNew,onView,onEdit,onDelete})=>{
+  const[q,setQ]=useState('');
+  const[sf,setSf]=useState('createdAt');
+  const[sd,setSd]=useState('desc');
+
+  const list=useMemo(()=>{
+    let r=q.trim()?patients.filter(p=>
+      p.fullName.toLowerCase().includes(q.toLowerCase())||
+      p.patientCode.toLowerCase().includes(q.toLowerCase())||
+      (p.phone||'').includes(q)||(p.nationalId||'').includes(q)
+    ):[...patients];
+    r.sort((a,b)=>{const av=(a[sf]||'').toLowerCase();const bv=(b[sf]||'').toLowerCase();return sd==='asc'?(av>bv?1:-1):(av<bv?1:-1)});
+    return r;
+  },[patients,q,sf,sd]);
+
+  const sort=f=>{if(sf===f)setSd(d=>d==='asc'?'desc':'asc');else{setSf(f);setSd('asc')}};
+  const SH=({f,l})=>(
+    <button onClick={()=>sort(f)} style={{background:'none',border:'none',cursor:'pointer',fontSize:11,fontWeight:700,color:sf===f?C.text:C.hint,textTransform:'uppercase',letterSpacing:.6,display:'flex',alignItems:'center',gap:3,fontFamily:'inherit'}}>
+      {l}<span style={{fontSize:10}}>{sf===f?(sd==='asc'?' ▲':' ▼'):' ↕'}</span>
+    </button>
+  );
+
+  const today=new Date().toISOString().slice(0,10);
+  const stats=[
+    {l:'Total',v:patients.length,accent:true},
+    {l:'Today',v:patients.filter(p=>p.createdAt?.startsWith(today)).length},
+    {l:'Male',v:patients.filter(p=>p.gender==='male').length},
+    {l:'Female',v:patients.filter(p=>p.gender==='female').length},
+  ];
+
+  return(
+    <div>
+      <SecHead title="Patients" sub="Register and manage all lab patients"
+        action={<Btn v="dark" onClick={onNew}>+ Register Patient</Btn>}/>
+
+      <div style={{display:'grid',gridTemplateColumns:'repeat(4,1fr)',gap:12,marginBottom:24}}>
+        {stats.map(s=><Stat key={s.l} label={s.l} value={s.v} accent={s.accent} icon=""/>)}
+      </div>
+
+      <Card style={{padding:0,overflow:'hidden'}}>
+        {/* Search */}
+        <div style={{padding:'16px 20px',borderBottom:`1px solid ${C.border}`,background:'#FAFAFA'}}>
+          <div style={{position:'relative'}}>
+            <span style={{position:'absolute',left:12,top:'50%',transform:'translateY(-50%)',color:C.hint}}>🔍</span>
+            <input value={q} onChange={e=>setQ(e.target.value)}
+              placeholder="Search by name, patient code, phone or national ID…"
+              style={{...s.input,paddingLeft:36,background:'#fff'}}/>
+            {q&&<button onClick={()=>setQ('')} style={{position:'absolute',right:10,top:'50%',transform:'translateY(-50%)',background:'none',border:'none',fontSize:18,color:C.hint,cursor:'pointer'}}>×</button>}
+          </div>
+        </div>
+
+        {list.length===0?(
+          <Empty icon="👥" title={q?'No results found':'No patients yet'}
+            sub={q?'Try a different search term':'Register your first patient to get started'}
+            action={!q&&<Btn v="dark" onClick={onNew}>+ Register first patient</Btn>}/>
+        ):(
+          <>
+          <div style={{overflowX:'auto'}}>
+            <table style={{width:'100%',borderCollapse:'collapse',fontSize:13}}>
+              <thead>
+                <tr>
+                  <th style={s.th}><SH f="patientCode" l="Code"/></th>
+                  <th style={s.th}><SH f="fullName" l="Name"/></th>
+                  <th style={s.th}>Gender</th>
+                  <th style={s.th}><SH f="phone" l="Phone"/></th>
+                  <th style={s.th}>DOB</th>
+                  <th style={s.th}>Blood</th>
+                  <th style={s.th}><SH f="createdAt" l="Registered"/></th>
+                  <th style={s.th}>Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {list.map((p,i)=>(
+                  <tr key={p.id} onClick={()=>onView(p)}
+                    style={{cursor:'pointer',transition:'background .1s'}}
+                    onMouseEnter={e=>e.currentTarget.style.background='#F8FAFC'}
+                    onMouseLeave={e=>e.currentTarget.style.background='transparent'}>
+                    <td style={s.td}>
+                      <span style={{fontFamily:'monospace',fontSize:11,background:'#EEF2FF',color:C.primary,padding:'3px 8px',borderRadius:5,fontWeight:700}}>{p.patientCode}</span>
+                    </td>
+                    <td style={s.td}>
+                      <div style={{display:'flex',alignItems:'center',gap:10}}>
+                        <Avatar name={p.fullName} idx={patients.indexOf(p)} size={32}/>
+                        <div>
+                          <div style={{fontWeight:600,color:C.text}}>{p.fullName}</div>
+                          {p.refDoctor&&<div style={{fontSize:11,color:C.hint}}>via {p.refDoctor}</div>}
+                        </div>
+                      </div>
+                    </td>
+                    <td style={s.td}><Badge label={p.gender||'—'} type={p.gender}/></td>
+                    <td style={{...s.td,color:C.muted}}>{p.phone||'—'}</td>
+                    <td style={{...s.td,color:C.muted}}>{fmtDate(p.dob)}</td>
+                    <td style={s.td}>{p.bloodGroup?<Badge label={p.bloodGroup}/>:'—'}</td>
+                    <td style={{...s.td,color:C.muted,fontSize:12}}>{fmtDate(p.createdAt)}</td>
+                    <td style={s.td} onClick={e=>e.stopPropagation()}>
+                      <div style={{display:'flex',gap:5}}>
+                        <Btn sm v="ghost" onClick={()=>onEdit(p)}>✏</Btn>
+                        <Btn sm v="danger" onClick={()=>onDelete(p.id)}>🗑</Btn>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <div style={{padding:'10px 20px',borderTop:`1px solid ${C.border}`,fontSize:12,color:C.hint,background:'#FAFAFA'}}>
+            Showing {list.length} of {patients.length} patient{patients.length!==1?'s':''}
+            {q&&` matching "${q}"`}
+          </div>
+          </>
+        )}
+      </Card>
+    </div>
+  );
+};
+
+// ── Module root ───────────────────────────────────
+const PatientsModule=()=>{
+  const[patients,setPatients]=useState(()=>db.get('patholab_patients',[]));
+  const[view,setView]=useState('list');
+  const[editP,setEditP]=useState(null);
+  const[viewP,setViewP]=useState(null);
+
+  const save=(updated)=>{setPatients(updated);db.set('patholab_patients',updated)};
+
+  const handleSave=form=>{
+    if(editP) save(patients.map(p=>p.id===editP.id?{...p,...form,updatedAt:now()}:p));
+    else save([{id:uid(),patientCode:genCode(),...form,createdAt:now()},...patients]);
+    setEditP(null);setView('list');
+  };
+  const handleDelete=id=>{
+    if(!window.confirm('Delete this patient? This cannot be undone.'))return;
+    save(patients.filter(p=>p.id!==id));
+    if(viewP?.id===id)setView('list');
+  };
+
+  if(view==='form') return <PatientForm
+    init={editP?{fullName:editP.fullName||'',gender:editP.gender||'male',dob:editP.dob||'',phone:editP.phone||'',email:editP.email||'',nationalId:editP.nationalId||'',bloodGroup:editP.bloodGroup||'',refDoctor:editP.refDoctor||'',address:editP.address||'',notes:editP.notes||''}:EMPTY}
+    onSave={handleSave} onCancel={()=>{setEditP(null);setView('list')}} isEdit={!!editP}/>;
+
+  if(view==='detail'&&viewP){
+    const fresh=patients.find(p=>p.id===viewP.id)||viewP;
+    const idx=patients.findIndex(p=>p.id===viewP.id);
+    return <PatientDetail patient={fresh} idx={idx}
+      onEdit={()=>{setEditP(fresh);setView('form')}}
+      onDelete={()=>handleDelete(fresh.id)}
+      onBack={()=>setView('list')}/>;
+  }
+
+  return <PatientList patients={patients}
+    onNew={()=>{setEditP(null);setView('form')}}
+    onView={p=>{setViewP(p);setView('detail')}}
+    onEdit={p=>{setEditP(p);setView('form')}}
+    onDelete={handleDelete}/>;
+};
+
+/* ═══════════════════════════════════════════════════
+   APP ROOT
+═══════════════════════════════════════════════════ */
+const App=()=>{
+  const[tab,setTab]=useState('dashboard');
+  const patients=db.get('patholab_patients',[]);
+
+  const renderModule=()=>{
+    if(tab==='dashboard') return <Dashboard patients={patients} setTab={setTab}/>;
+    if(tab==='patients') return <PatientsModule/>;
+    return(
+      <div style={{display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',height:'60vh',color:C.hint}}>
+        <div style={{fontSize:52,marginBottom:16}}>🚧</div>
+        <div style={{fontSize:20,fontWeight:700,color:C.muted}}>Coming soon</div>
+        <div style={{fontSize:13,marginTop:6}}>This module is being built next</div>
+      </div>
+    );
+  };
+
+  return(
+    <div style={{display:'flex',minHeight:'100vh'}}>
+      <Sidebar active={tab} set={setTab}/>
+      <main style={{flex:1,padding:'32px 36px',overflowY:'auto',maxWidth:1140}}>
+        {renderModule()}
+      </main>
+    </div>
+  );
+};
+
+ReactDOM.createRoot(document.getElementById('root')).render(<App/>);
+</script>
+</body>
+</html>
